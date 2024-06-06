@@ -67,6 +67,9 @@ pub struct WebxdcManifest {
     /// Optional URL of webxdc source code.
     pub source_code_url: Option<String>,
 
+    /// If the webxdc is an integration.
+    pub integration: Option<String>,
+
     /// If the webxdc requests network access.
     pub request_internet_access: Option<bool>,
 }
@@ -92,6 +95,9 @@ pub struct WebxdcInfo {
 
     /// URL of webxdc source code or an empty string.
     pub source_code_url: String,
+
+    /// Set to "maps" if the webxdc is an integration, otherwise an empty string.
+    pub integration: String,
 
     /// If the webxdc is allowed to access the network.
     /// It should request access, be encrypted
@@ -903,6 +909,7 @@ impl Message {
             } else {
                 "".to_string()
             },
+            integration: manifest.integration.unwrap_or_default(),
             internet_access,
         })
     }
