@@ -941,6 +941,20 @@ async fn test_contact_avatar() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_self_chat() -> Result<()> {
+    let mut tcm = TestContextManager::new();
+    let alice = &tcm.alice().await;
+    enable_verified_oneonone_chats(&[alice]).await;
+    let chat = alice.get_self_chat().await;
+    assert!(!chat.is_protected());
+    assert_eq!(
+        chat.id.is_protected(alice).await?,
+        ProtectionStatus::Unprotected
+    );
+    Ok(())
+}
+
 // ============== Helper Functions ==============
 
 async fn assert_verified(this: &TestContext, other: &TestContext, protected: ProtectionStatus) {
