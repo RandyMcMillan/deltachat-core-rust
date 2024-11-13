@@ -2331,6 +2331,18 @@ async fn apply_group_changes(
                 context,
                 "Recreating chat {chat_id} member list with {new_members:?}.",
             );
+            if !self_added
+                && (chat.blocked == Blocked::Request || !chat_contacts.contains(&ContactId::SELF))
+            {
+                group_changes_msgs.push(
+                    stock_str::msg_add_member_local(
+                        context,
+                        &context.get_primary_self_addr().await?,
+                        ContactId::UNDEFINED,
+                    )
+                    .await,
+                );
+            }
         }
 
         if new_members != chat_contacts {
