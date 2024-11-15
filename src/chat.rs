@@ -3295,10 +3295,10 @@ pub async fn marknoticed_chat(context: &Context, chat_id: ChatId) -> Result<()> 
             .query_map(
                 "SELECT DISTINCT(m.chat_id) FROM msgs m
                     LEFT JOIN chats c ON m.chat_id=c.id
-                    WHERE m.state=10 AND m.hidden=0 AND m.chat_id>9 AND c.blocked=0 AND c.archived=1",
-                    (),
+                    WHERE m.state=10 AND m.chat_id>9 AND c.blocked=0 AND c.archived=1",
+                (),
                 |row| row.get::<_, ChatId>(0),
-                |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+                |ids| ids.collect::<Result<Vec<_>, _>>().map_err(Into::into),
             )
             .await?;
         if chat_ids_in_archive.is_empty() {
@@ -3309,7 +3309,7 @@ pub async fn marknoticed_chat(context: &Context, chat_id: ChatId) -> Result<()> 
             .sql
             .execute(
                 &format!(
-                    "UPDATE msgs SET state=13 WHERE state=10 AND hidden=0 AND chat_id IN ({});",
+                    "UPDATE msgs SET state=13 WHERE state=10 AND chat_id IN ({});",
                     sql::repeat_vars(chat_ids_in_archive.len())
                 ),
                 rusqlite::params_from_iter(&chat_ids_in_archive),
@@ -3319,20 +3319,38 @@ pub async fn marknoticed_chat(context: &Context, chat_id: ChatId) -> Result<()> 
             context.emit_event(EventType::MsgsNoticed(chat_id_in_archive));
             chatlist_events::emit_chatlist_item_changed(context, chat_id_in_archive);
         }
-    } else if context
-        .sql
-        .execute(
-            "UPDATE msgs
-            SET state=?
-          WHERE state=?
-            AND hidden=0
-            AND chat_id=?;",
-            (MessageState::InNoticed, MessageState::InFresh, chat_id),
-        )
-        .await?
-        == 0
-    {
-        return Ok(());
+    } else {
+        let conn_fn = |conn: &mut rusqlite::Connection| {
+            let nr_msgs_noticed = conn.execute(
+                "UPDATE msgs
+                    SET state=?
+                    WHERE state=?
+                    AND hidden=0
+                    AND chat_id=?",
+                (MessageState::InNoticed, MessageState::InFresh, chat_id),
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT id FROM msgs
+                    WHERE state>=? AND state<?
+                    AND hidden=1
+                    AND chat_id=?",
+            )?;
+            let hidden_msgs = stmt
+                .query_map(
+                    (MessageState::InFresh, MessageState::InSeen, chat_id),
+                    |row| {
+                        let id: MsgId = row.get(0)?;
+                        Ok(id)
+                    },
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok((nr_msgs_noticed, hidden_msgs))
+        };
+        let (nr_msgs_noticed, hidden_msgs) = context.sql.call_write(conn_fn).await?;
+        if nr_msgs_noticed == 0 && hidden_msgs.is_empty() {
+            return Ok(());
+        }
+        message::markseen_msgs(context, hidden_msgs).await?;
     }
 
     context.emit_event(EventType::MsgsNoticed(chat_id));
@@ -3377,7 +3395,6 @@ pub(crate) async fn mark_old_messages_as_noticed(
                     "UPDATE msgs
             SET state=?
           WHERE state=?
-            AND hidden=0
             AND chat_id=?
             AND timestamp<=?;",
                     (
